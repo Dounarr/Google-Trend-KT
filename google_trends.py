@@ -71,14 +71,19 @@ def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
     # Create output directory if it doesn't exist
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Save CSV
+    # Save CSV - reset_index() to include the date column properly
     csv_path = os.path.join(OUTPUT_DIR, 'google_trends_data.csv')
-    data.to_csv(csv_path)
+    data.reset_index().to_csv(csv_path, index=False)
     print(f"Data saved to '{csv_path}'")
     
     # Create and save plot
     plt.figure(figsize=(10, 6))
-    data[keywords].plot(title="Google Trends Data")
+    # Plot directly from the original DataFrame
+    for keyword in keywords:
+        if keyword in data.columns:  # Check if keyword exists in the data
+            plt.plot(data.index, data[keyword], label=keyword)
+    
+    plt.title("Google Trends Data")
     plt.xlabel("Date")
     plt.ylabel("Search Interest")
     plt.legend(title="Keywords")
@@ -86,7 +91,7 @@ def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
     
     plot_path = os.path.join(OUTPUT_DIR, 'google_trends_plot.png')
     plt.savefig(plot_path)
-    plt.show()
+    plt.close()  # Close the figure to free memory
     print(f"Plot saved to '{plot_path}'")
 
 def main():
