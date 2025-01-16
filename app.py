@@ -14,6 +14,9 @@ try:
     import os
     from datetime import datetime
     from PIL import Image
+    import plotly.express as px
+    from concurrent.futures import ThreadPoolExecutor
+    import numpy as np
     
     st.success("All imports successful!")
 except Exception as e:
@@ -31,16 +34,26 @@ The Excel file should have a column named 'Keywords'.
 uploaded_file = st.file_uploader("Choose an Excel file", type=['xlsx', 'xls'])
 
 # Add this near the top of the file, after imports
-@st.cache_data(ttl=3600)  # Cache data for 1 hour
-def cached_fetch_trends_data(keyword):
-    """Cached version of fetch_trends_data for single keyword"""
+@st.cache_data
+def load_keywords_cached(file):
+    """Cache the keyword loading process"""
+    return load_keywords_from_file(file)
+
+@st.cache_data(ttl=3600)
+def cached_fetch_trends_data(keywords_batch):
+    """Cached version of fetch_trends_data for a batch of keywords (up to 5)"""
     pytrends = TrendReq(hl='en-US', tz=360)
-    return fetch_trends_data(pytrends, [keyword])
+    return fetch_trends_data(pytrends, keywords_batch)
+
+def process_keyword_batch(keywords_batch, status_text):
+    """Process a batch of keywords together"""
+    status_text.text(f"Fetching data for keywords: {', '.join(keywords_batch)}")
+    return cached_fetch_trends_data(keywords_batch)
 
 if uploaded_file is not None:
     try:
-        # Load keywords
-        keywords = load_keywords_from_file(uploaded_file)
+        # Load keywords with caching
+        keywords = load_keywords_cached(uploaded_file)
         
         st.write("Keywords found:", keywords)
         
@@ -50,33 +63,32 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            # Calculate progress steps
-            total_keywords = len(keywords)
-            progress_step = 1.0 / total_keywords
+            # Create batches of keywords (up to 5 per batch)
+            keyword_batches = [keywords[i:i + 5] for i in range(0, len(keywords), 5)]
+            total_batches = len(keyword_batches)
+            progress_step = 1.0 / total_batches
             
             # Initialize empty DataFrame for data
             data = pd.DataFrame()
             
-            # Process each keyword with progress updates
-            for idx, keyword in enumerate(keywords):
-                status_text.text(f"Fetching data for keyword: {keyword} ({idx+1}/{total_keywords})")
+            # Process keyword batches
+            for idx, batch in enumerate(keyword_batches):
                 try:
-                    # Use cached function instead of direct API call
-                    keyword_data = cached_fetch_trends_data(keyword)
-                    if keyword_data is not None and not keyword_data.empty:
+                    batch_data = process_keyword_batch(batch, status_text)
+                    if batch_data is not None and not batch_data.empty:
                         if data.empty:
-                            data = keyword_data
+                            data = batch_data
                         else:
-                            data = pd.merge(data, keyword_data, left_index=True, right_index=True, how='outer')
+                            data = pd.merge(data, batch_data, left_index=True, right_index=True, how='outer')
                     
                     # Update progress
                     progress_bar.progress((idx + 1) * progress_step)
                     
                 except Exception as e:
-                    st.warning(f"Error fetching data for {keyword}: {str(e)}")
+                    st.warning(f"Error fetching data for batch {batch}: {str(e)}")
                     continue
             
-            # Clear the status text and progress bar
+            # Clear the progress indicators
             status_text.empty()
             progress_bar.empty()
             
@@ -99,16 +111,31 @@ if uploaded_file is not None:
                 
                 with col2:
                     st.write("### Trend Visualization")
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    data[keywords].plot(ax=ax, title="Google Trends Data")
-                    plt.xlabel("Date")
-                    plt.ylabel("Search Interest")
-                    plt.legend(title="Keywords")
-                    plt.grid()
-                    st.pyplot(fig)
+                    # Convert data to long format for plotly
+                    data_long = data.reset_index().melt(
+                        id_vars=['index'],
+                        value_vars=keywords,
+                        var_name='Keyword',
+                        value_name='Interest'
+                    )
+                    
+                    # Create interactive plot with plotly
+                    fig = px.line(
+                        data_long,
+                        x='index',
+                        y='Interest',
+                        color='Keyword',
+                        title="Google Trends Data"
+                    )
+                    fig.update_layout(
+                        xaxis_title="Date",
+                        yaxis_title="Search Interest",
+                        hovermode='x unified'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
                     
                     # Create download button for plot
-                    plt.savefig('temp_plot.png')
+                    fig.write_image("temp_plot.png")
                     with open('temp_plot.png', 'rb') as file:
                         st.download_button(
                             label="Download Plot",
