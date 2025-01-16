@@ -113,7 +113,7 @@ if uploaded_file is not None:
                     st.write("### Trend Visualization")
                     # Convert data to long format for plotly
                     data_long = data.reset_index().melt(
-                        id_vars=['index'],
+                        id_vars=['date'],
                         value_vars=keywords,
                         var_name='Keyword',
                         value_name='Interest'
@@ -122,7 +122,7 @@ if uploaded_file is not None:
                     # Create interactive plot with plotly
                     fig = px.line(
                         data_long,
-                        x='index',
+                        x='date',
                         y='Interest',
                         color='Keyword',
                         title="Google Trends Data"
