@@ -5,15 +5,50 @@ import matplotlib.pyplot as plt
 import os
 from typing import List, Optional
 
-# Configuration
+# Configuration - making sure these are available for import
 OUTPUT_DIR = 'output'
 EXCEL_FILE = 'keywords.xlsx'
 SHEET_NAME = 'Sheet1'
+
+# Make sure TrendReq is available for import
+__all__ = ['TrendReq', 'OUTPUT_DIR', 'fetch_trends_data', 'load_keywords_from_file']
 
 def load_keywords_from_file(file_path: str) -> List[str]:
     """Load keywords from Excel file."""
     df = pd.read_excel(file_path)
     return df['Keywords'].dropna().tolist()
+
+def fetch_trends_data(keywords: List[str], pytrends: Optional[TrendReq] = None) -> Optional[pd.DataFrame]:
+    """Function to get trends data (for compatibility with app.py)."""
+    print(f"Starting trends analysis for keywords: {keywords}")
+    
+    try:
+        # Use provided pytrends instance or create new one
+        if pytrends is None:
+            pytrends = TrendReq(hl='en-US', tz=360)
+        
+        # Build payload
+        pytrends.build_payload(
+            keywords,
+            cat=0,
+            timeframe='today 5-y',
+            geo='DE',
+            gprop=''
+        )
+        
+        # Get data
+        data = pytrends.interest_over_time()
+        
+        if data is not None and not data.empty:
+            print("Successfully retrieved data!")
+            return data
+        else:
+            print("No data returned from Google Trends")
+            return None
+            
+    except Exception as e:
+        print(f"Error getting trends data: {str(e)}")
+        return None
 
 def analyze_trends(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Simple function to get trends data."""
