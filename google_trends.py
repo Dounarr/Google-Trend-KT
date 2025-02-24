@@ -45,6 +45,9 @@ def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
 
 def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Fetch Google Trends data."""
+    print("DEBUG: Starting fetch_trends_data with keywords:", keywords)  # Debug line
+    print("DEBUG: Type of keywords:", type(keywords))  # Debug line
+    
     pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
     batch_size = 2
     batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
@@ -54,6 +57,7 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     
     for batch in batches:
         print(f"\nFetching data for: {batch}")
+        print("DEBUG: Type of batch:", type(batch))  # Debug line
         
         for attempt in range(MAX_RETRIES):
             try:
@@ -74,29 +78,20 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
                     print(f"No data returned for: {batch}")
                 
             except Exception as e:
-                print(f"Error on attempt {attempt + 1} for {batch}: {str(e)}")
+                print(f"Error on attempt {attempt + 1} for {batch}")
+                print(f"DEBUG: Full error: {repr(e)}")  # Debug line
+                print(f"DEBUG: Error type: {type(e)}")  # Debug line
                 if attempt < MAX_RETRIES - 1:
                     delay = random.uniform(1, 3)
                     print(f"Retrying in {delay:.1f} seconds...")
                     time.sleep(delay)
-        
-        # Add delay between batches
-        if batch != batches[-1]:  # Don't delay after the last batch
-            delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 2)
-            print(f"Waiting {delay:.1f} seconds before next batch...")
-            time.sleep(delay)
-
+    
     if not all_data:
-        print("\nNo data could be retrieved. Possible reasons:")
-        print("• Keywords have very low search volume")
-        print("• Keywords are too specific")
-        print("• Rate limiting from Google Trends")
+        print("\nNo data could be retrieved.")
         return None
 
-    # Combine all results
     combined_data = pd.concat(all_data, axis=1)
     combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
-    print(f"\nSuccessfully retrieved data for {combined_data.shape[1]} keywords")
     return combined_data
 
 def load_keywords_from_file(file_path: str, sheet_name: str = 'Sheet1') -> List[str]:
@@ -168,18 +163,17 @@ def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
 def main():
     """Main execution function."""
     try:
+        print("DEBUG: Starting main function")  # Debug line
         print(f"Current working directory: {os.getcwd()}")
         
-        # Check if Excel file exists
         excel_path = os.path.abspath(EXCEL_FILE)
         if not os.path.exists(excel_path):
             raise FileNotFoundError(f"Excel file not found at: {excel_path}")
         
-        # Load keywords
-        keywords = load_keywords(EXCEL_FILE, SHEET_NAME)
-        print(f"Loaded {len(keywords)} keywords: {keywords}")
+        keywords = load_keywords_from_file(excel_path, SHEET_NAME)
+        print("DEBUG: Keywords loaded:", keywords)  # Debug line
+        print("DEBUG: Type of keywords object:", type(keywords))  # Debug line
         
-        # Fetch data
         data = fetch_trends_data(keywords)
         
         if data is not None and not data.empty:
@@ -188,6 +182,7 @@ def main():
             print("\nNo data retrieved. Please try again later.")
     
     except Exception as e:
+        print(f"DEBUG: Error in main: {repr(e)}")  # Debug line
         print(f"An error occurred: {type(e).__name__}: {str(e)}")
 
 if __name__ == "__main__":
