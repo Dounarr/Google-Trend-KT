@@ -32,69 +32,54 @@ def test_internet_connection():
 
 def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Simple function to get trends data."""
-    print(f"Starting trends analysis for keywords: {keywords}")
+    print("\nStarting trends analysis...")
+    print(f"Input keywords: {keywords}")
+    
+    # First test with a known keyword
+    test_keyword = "Auto"
+    print(f"\nTesting API with keyword: {test_keyword}")
     
     try:
-        # Initialize pytrends with conservative settings
         pytrends = TrendReq(
-            hl='de-DE',  # German language
-            tz=60,       # Europe/Berlin timezone
+            hl='de-DE',
+            tz=60,
             timeout=(10, 25),
             retries=2,
-            backoff_factor=0.5,
-            requests_args={
-                'verify': True,
-                'headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/108.0.0.0 Safari/537.36'
-                }
-            }
+            backoff_factor=0.5
         )
         
-        # Try with just one keyword first
-        test_keyword = keywords[0]
-        print(f"\nTesting with single keyword: {test_keyword}")
+        # Test with known keyword
+        pytrends.build_payload(
+            kw_list=[test_keyword],
+            timeframe='today 12-m',
+            geo='DE'
+        )
         
-        try:
-            # Build payload for single keyword
-            pytrends.build_payload(
-                kw_list=[test_keyword],
-                timeframe='today 12-m',  # Last 12 months
-                geo='DE',                # Germany
-                gprop=''                 # Web search
-            )
+        test_data = pytrends.interest_over_time()
+        if test_data is None or test_data.empty:
+            print("Could not get data even for test keyword. API might be unavailable.")
+            return None
             
-            # Get the data
-            data = pytrends.interest_over_time()
-            
-            if data is not None and not data.empty:
-                print(f"Successfully retrieved data for {test_keyword}")
-                print(f"Data shape: {data.shape}")
-                print(f"Columns: {data.columns.tolist()}")
-                return data
-            else:
-                print(f"No data returned for keyword: {test_keyword}")
-                # Try an alternative keyword as a test
-                print("\nTrying with test keyword 'Auto' to verify API...")
-                pytrends.build_payload(
-                    kw_list=['Auto'],
-                    timeframe='today 12-m',
-                    geo='DE'
-                )
-                test_data = pytrends.interest_over_time()
-                if test_data is not None and not test_data.empty:
-                    print("Test keyword worked - your keyword might have too low search volume")
-                else:
-                    print("Test keyword also failed - might be an API issue")
-                return None
-                
-        except Exception as e:
-            print(f"Error during request: {str(e)}")
-            print("Type of error:", type(e).__name__)
+        print("Test successful! Now trying with actual keyword...")
+        
+        # Now try with actual keyword
+        actual_keyword = keywords[0]
+        pytrends.build_payload(
+            kw_list=[actual_keyword],
+            timeframe='today 12-m',
+            geo='DE'
+        )
+        
+        data = pytrends.interest_over_time()
+        if data is not None and not data.empty:
+            print(f"Successfully retrieved data for {actual_keyword}")
+            return data
+        else:
+            print(f"No data available for keyword: {actual_keyword}")
             return None
             
     except Exception as e:
-        print(f"Error in fetch_trends_data: {str(e)}")
-        print("Type of error:", type(e).__name__)
+        print(f"Error during request: {str(e)}")
         return None
 
 def analyze_trends(keywords: List[str]) -> Optional[pd.DataFrame]:
