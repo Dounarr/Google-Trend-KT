@@ -58,7 +58,8 @@ def load_keywords(file_path: str, sheet_name: str) -> List[str]:
 
 def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.DataFrame]:
     """Fetch Google Trends data with retry logic and batch processing."""
-    batch_size = 5
+    # Reduce batch size to 2 for better success rate
+    batch_size = 2
     all_data = []
     
     for i in range(0, len(keywords), batch_size):
@@ -66,57 +67,59 @@ def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.Da
         print(f"\nFetching data for keywords: {batch_keywords}")
         print(f"Processing batch {i//batch_size + 1} of {(len(keywords) + batch_size - 1)//batch_size}")
         
-        if i > 0:
-            delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 10)
-            print(f"Waiting {delay:.1f} seconds before next batch...")
-            time.sleep(delay)
+        # Increase initial delay
+        delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 10)
+        print(f"Waiting {delay:.1f} seconds before fetching...")
+        time.sleep(delay)
         
         success = False
         for attempt in range(MAX_RETRIES):
             try:
                 print(f"\nAttempt {attempt + 1}/{MAX_RETRIES}")
-                pytrends.build_payload(batch_keywords, cat=0, timeframe=TIMEFRAME, geo='', gprop='')
+                # Try with a longer timeframe to increase chances of getting data
+                pytrends.build_payload(
+                    batch_keywords,
+                    cat=0,
+                    timeframe='today 5-y',  # Changed from 12-m to 5-y
+                    geo='DE',  # Added German region since these seem to be German keywords
+                    gprop=''
+                )
                 batch_data = pytrends.interest_over_time()
                 
-                if batch_data is not None:
-                    print(f"Response received - Data shape: {batch_data.shape}")
-                    print(f"Columns in response: {batch_data.columns.tolist()}")
-                    
-                    if not batch_data.empty:
-                        all_data.append(batch_data)
-                        print(f"Successfully fetched data for batch {i//batch_size + 1}")
-                        success = True
-                        break
-                    else:
-                        print("Warning: Received empty DataFrame from Google Trends")
+                if batch_data is not None and not batch_data.empty:
+                    print(f"Success! Data shape: {batch_data.shape}")
+                    print(f"Data found for keywords: {batch_data.columns.tolist()}")
+                    all_data.append(batch_data)
+                    success = True
+                    break
                 else:
-                    print("Warning: Received None response from Google Trends")
+                    print(f"No data returned for keywords: {batch_keywords}")
                     
             except Exception as e:
-                remaining_attempts = MAX_RETRIES - attempt - 1
-                print(f"Error occurred (attempts remaining: {remaining_attempts}):")
-                print(f"Error details: {type(e).__name__}: {str(e)}")
-                
-                if remaining_attempts > 0:
+                print(f"Error occurred: {type(e).__name__}: {str(e)}")
+                if attempt < MAX_RETRIES - 1:
                     retry_delay = random.uniform(MIN_RETRY_DELAY, MAX_RETRY_DELAY)
                     print(f"Retrying in {retry_delay:.1f} seconds...")
                     time.sleep(retry_delay)
-                else:
-                    print(f"Failed to fetch data for batch: {batch_keywords}")
         
         if not success:
-            print(f"Skipping batch after {MAX_RETRIES} failed attempts")
+            print(f"Warning: Could not fetch data for keywords: {batch_keywords}")
             continue
-    
+
     if not all_data:
-        print("No data was collected from any batch")
+        print("\nDetailed troubleshooting information:")
+        print("- Keywords attempted:", keywords)
+        print("- No data was successfully retrieved for any keyword combination")
+        print("- This might be because:")
+        print("  * The keywords have very low search volume")
+        print("  * The keywords are too specific or regional")
+        print("  * Google Trends doesn't have enough data for these terms")
         return None
     
     # Combine all batches
     combined_data = pd.concat(all_data, axis=1)
-    # Remove duplicate columns if any
     combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
-    print(f"Final combined data shape: {combined_data.shape}")
+    print(f"\nFinal combined data shape: {combined_data.shape}")
     return combined_data
 
 def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
