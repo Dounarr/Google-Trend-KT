@@ -7,6 +7,10 @@ from typing import List, Optional
 import random
 import requests
 
+# Print version information
+print("Python version:", pd.__version__)
+print("Pytrends version:", TrendReq.__module__)
+
 # Configuration
 OUTPUT_DIR = 'output'
 EXCEL_FILE = 'keywords.xlsx'
@@ -32,14 +36,23 @@ def test_internet_connection():
 
 def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Simple function to get trends data."""
-    print("\nStarting trends analysis...")
-    print(f"Input keywords: {keywords}")
+    print("\nDEBUG: fetch_trends_data called with keywords:", keywords)
+    print("DEBUG: Type of keywords:", type(keywords))
     
-    # First test with a known keyword
-    test_keyword = "Auto"
-    print(f"\nTesting API with keyword: {test_keyword}")
-    
+    if not isinstance(keywords, list):
+        print("ERROR: keywords must be a list")
+        return None
+        
+    if not keywords:
+        print("ERROR: keywords list is empty")
+        return None
+        
+    if not all(isinstance(k, str) for k in keywords):
+        print("ERROR: all keywords must be strings")
+        return None
+
     try:
+        print("\nInitializing TrendReq...")
         pytrends = TrendReq(
             hl='de-DE',
             tz=60,
@@ -48,38 +61,27 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             backoff_factor=0.5
         )
         
-        # Test with known keyword
+        print(f"\nBuilding payload for keywords: {keywords}")
         pytrends.build_payload(
-            kw_list=[test_keyword],
+            kw_list=keywords[:1],  # Just take the first keyword
             timeframe='today 12-m',
             geo='DE'
         )
         
-        test_data = pytrends.interest_over_time()
-        if test_data is None or test_data.empty:
-            print("Could not get data even for test keyword. API might be unavailable.")
-            return None
-            
-        print("Test successful! Now trying with actual keyword...")
-        
-        # Now try with actual keyword
-        actual_keyword = keywords[0]
-        pytrends.build_payload(
-            kw_list=[actual_keyword],
-            timeframe='today 12-m',
-            geo='DE'
-        )
-        
+        print("\nRequesting data from Google Trends...")
         data = pytrends.interest_over_time()
+        
         if data is not None and not data.empty:
-            print(f"Successfully retrieved data for {actual_keyword}")
+            print("SUCCESS: Data retrieved!")
+            print(f"Data shape: {data.shape}")
+            print(f"Columns: {data.columns.tolist()}")
             return data
         else:
-            print(f"No data available for keyword: {actual_keyword}")
+            print("ERROR: No data returned from Google Trends")
             return None
             
     except Exception as e:
-        print(f"Error during request: {str(e)}")
+        print(f"ERROR in fetch_trends_data: {type(e).__name__}: {str(e)}")
         return None
 
 def analyze_trends(keywords: List[str]) -> Optional[pd.DataFrame]:
