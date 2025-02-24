@@ -43,61 +43,48 @@ def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
     with open(cache_file, 'wb') as f:
         pickle.dump(data, f)
 
-def fetch_single_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch a single batch of keywords."""
-    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
-    
-    for attempt in range(MAX_RETRIES):
-        try:
-            pytrends.build_payload(
-                batch_keywords,
-                cat=0,
-                timeframe='today 5-y',
-                geo='DE',
-                gprop=''
-            )
-            data = pytrends.interest_over_time()
-            
-            if data is not None and not data.empty:
-                print(f"✓ Successfully fetched data for: {batch_keywords}")
-                return data
-            
-            print(f"No data returned for: {batch_keywords}")
-            time.sleep(random.uniform(1, 3))
-            
-        except Exception as e:
-            print(f"Error on attempt {attempt + 1} for {batch_keywords}: {str(e)}")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(random.uniform(1, 3))
-    
-    return None
-
 def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch Google Trends data using parallel processing."""
+    """Fetch Google Trends data."""
+    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
     batch_size = 2
     batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
     all_data = []
     
     print(f"\nProcessing {len(batches)} batches of keywords...")
     
-    # Use ThreadPoolExecutor for parallel processing
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        # Submit all batches to the executor
-        future_to_batch = {executor.submit(fetch_single_batch, batch): batch 
-                         for batch in batches}
+    for batch in batches:
+        print(f"\nFetching data for: {batch}")
         
-        # Process completed futures as they finish
-        for future in future_to_batch:
+        for attempt in range(MAX_RETRIES):
             try:
-                data = future.result()
-                if data is not None:
+                pytrends.build_payload(
+                    batch,
+                    cat=0,
+                    timeframe='today 5-y',
+                    geo='DE',
+                    gprop=''
+                )
+                data = pytrends.interest_over_time()
+                
+                if data is not None and not data.empty:
+                    print(f"✓ Successfully fetched data for: {batch}")
                     all_data.append(data)
+                    break
+                else:
+                    print(f"No data returned for: {batch}")
+                
             except Exception as e:
-                batch = future_to_batch[future]
-                print(f"Error processing batch {batch}: {str(e)}")
-            
-            # Add a small delay between batches
-            time.sleep(random.uniform(1, 2))
+                print(f"Error on attempt {attempt + 1} for {batch}: {str(e)}")
+                if attempt < MAX_RETRIES - 1:
+                    delay = random.uniform(1, 3)
+                    print(f"Retrying in {delay:.1f} seconds...")
+                    time.sleep(delay)
+        
+        # Add delay between batches
+        if batch != batches[-1]:  # Don't delay after the last batch
+            delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 2)
+            print(f"Waiting {delay:.1f} seconds before next batch...")
+            time.sleep(delay)
 
     if not all_data:
         print("\nNo data could be retrieved. Possible reasons:")
@@ -192,7 +179,7 @@ def main():
         keywords = load_keywords(EXCEL_FILE, SHEET_NAME)
         print(f"Loaded {len(keywords)} keywords: {keywords}")
         
-        # Fetch data using parallel processing
+        # Fetch data
         data = fetch_trends_data(keywords)
         
         if data is not None and not data.empty:
