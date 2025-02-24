@@ -20,81 +20,46 @@ def load_keywords_from_file(file_path: str) -> List[str]:
     return df['Keywords'].dropna().tolist()
 
 def fetch_trends_data(keywords: List[str], pytrends: Optional[TrendReq] = None) -> Optional[pd.DataFrame]:
-    """Function to get trends data with improved error handling and debugging."""
-    print(f"Starting trends analysis for keywords: {keywords}")
+    """Simple, direct approach to fetch trends data."""
+    print(f"Attempting to fetch data for keywords: {keywords}")
     
     try:
-        # Use provided pytrends instance or create new one with longer timeout
-        if pytrends is None:
-            pytrends = TrendReq(
-                hl='de-DE',  # Changed to German
-                tz=60,       # Changed timezone to Europe
-                timeout=(30, 30),  # Increased timeout
-                retries=3,
-                backoff_factor=0.5
-            )
+        # Create new pytrends instance with conservative settings
+        pytrends = TrendReq(
+            hl='de-DE',
+            tz=60,
+            timeout=(30, 30),
+            retries=2,
+            backoff_factor=1
+        )
         
-        # Process keywords in pairs
-        batch_size = 2
-        batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
-        all_data = []
+        # Try with just the first two keywords as a test
+        test_keywords = keywords[:2]
+        print(f"Testing with keywords: {test_keywords}")
         
-        for batch in batches:
-            print(f"\nTrying batch: {batch}")
-            
-            for attempt in range(3):  # Try each batch up to 3 times
-                try:
-                    # Add a small delay between attempts
-                    if attempt > 0:
-                        time.sleep(5)
-                    
-                    print(f"Building payload for: {batch}")
-                    pytrends.build_payload(
-                        batch,
-                        cat=0,
-                        timeframe='today 5-y',
-                        geo='DE',
-                        gprop=''
-                    )
-                    
-                    print("Requesting data...")
-                    data = pytrends.interest_over_time()
-                    
-                    if data is not None and not data.empty:
-                        print(f"✓ Successfully got data for: {batch}")
-                        print(f"Data shape: {data.shape}")
-                        print(f"Columns: {data.columns.tolist()}")
-                        all_data.append(data)
-                        break
-                    else:
-                        print(f"No data returned for batch: {batch}")
-                
-                except Exception as e:
-                    print(f"Attempt {attempt + 1} failed for {batch}: {str(e)}")
-                    if attempt == 2:  # Last attempt
-                        print(f"All attempts failed for batch: {batch}")
-            
-            # Add delay between batches
-            time.sleep(random.uniform(2, 3))
+        # Build payload with minimal parameters
+        pytrends.build_payload(
+            test_keywords,
+            timeframe='today 12-m',  # Last 12 months instead of 5 years
+            geo='DE'
+        )
         
-        if not all_data:
-            print("\nNo data could be retrieved for any keywords")
+        # Get the data
+        print("Requesting data from Google Trends...")
+        data = pytrends.interest_over_time()
+        
+        if data is not None and not data.empty:
+            print("Successfully retrieved data!")
+            print(f"Data shape: {data.shape}")
+            print(f"Columns: {data.columns.tolist()}")
+            return data
+        else:
+            print("No data was returned from Google Trends")
             return None
-        
-        # Combine all batch results
-        print("\nCombining results...")
-        combined_data = pd.concat(all_data, axis=1)
-        
-        # Remove duplicate columns if any
-        combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
-        
-        print(f"\nFinal data shape: {combined_data.shape}")
-        print(f"Final columns: {combined_data.columns.tolist()}")
-        
-        return combined_data
             
     except Exception as e:
-        print(f"Error in fetch_trends_data: {str(e)}")
+        print(f"Error occurred: {str(e)}")
+        print("Type of error:", type(e).__name__)
         return None
 
 def analyze_trends(keywords: List[str]) -> Optional[pd.DataFrame]:
@@ -140,7 +105,7 @@ def save_results(data: pd.DataFrame, keywords: List[str]):
     # Create plot
     plt.figure(figsize=(12, 6))
     for kw in keywords:
-        if kw in data.columns:  # Only plot if we have data for this keyword
+        if kw in data.columns:
             plt.plot(data.index, data[kw], label=kw)
     
     plt.title('Google Trends Data')
@@ -156,21 +121,27 @@ def save_results(data: pd.DataFrame, keywords: List[str]):
 def main():
     """Main function."""
     try:
-        # Load keywords
-        print("Loading keywords...")
-        keywords = load_keywords_from_file(EXCEL_FILE)
-        print(f"Loaded keywords: {keywords}")
+        # Test with hardcoded keywords first
+        test_keywords = ["Auto", "Berlin"]
+        print("\nTesting with simple keywords first...")
+        test_data = fetch_trends_data(test_keywords)
         
-        # Get data
-        print("\nFetching trends data...")
-        data = fetch_trends_data(keywords)
-        
-        # Save results if we got data
-        if data is not None and not data.empty:
-            save_results(data, keywords)
-            print("\nAnalysis completed successfully!")
+        if test_data is not None:
+            print("\nTest successful! Now trying with actual keywords...")
+            
+            # Now try with actual keywords
+            keywords = load_keywords_from_file(EXCEL_FILE)
+            print(f"Loaded keywords: {keywords}")
+            
+            data = fetch_trends_data(keywords)
+            
+            if data is not None and not data.empty:
+                save_results(data, keywords)
+                print("\nAnalysis completed successfully!")
+            else:
+                print("\nCould not complete analysis - no data retrieved")
         else:
-            print("\nCould not complete analysis - no data retrieved")
+            print("\nTest failed - could not even get test data")
             
     except Exception as e:
         print(f"Error in main function: {str(e)}")
