@@ -43,15 +43,9 @@ def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
     with open(cache_file, 'wb') as f:
         pickle.dump(data, f)
 
-async def fetch_batch(batch_keywords: List[str], session_pool: Dict[int, TrendReq]) -> Optional[pd.DataFrame]:
-    """Fetch a single batch of keywords using session pool."""
-    thread_id = threading.get_ident()
-    
-    # Get or create session for this thread
-    if thread_id not in session_pool:
-        session_pool[thread_id] = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
-    
-    pytrends = session_pool[thread_id]
+async def fetch_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
+    """Fetch a single batch of keywords."""
+    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
     
     # Check cache first
     cache_key = get_cache_key(batch_keywords, 'today 5-y', 'DE')
@@ -86,16 +80,15 @@ async def fetch_batch(batch_keywords: List[str], session_pool: Dict[int, TrendRe
     return None
 
 async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch Google Trends data using async approach with session pool."""
+    """Fetch Google Trends data using async approach."""
     batch_size = 2
     batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
     all_data = []
-    session_pool = {}
     
     print(f"\nProcessing {len(batches)} batches of keywords...")
     
     # Create a thread pool for running pytrends requests
-    with ThreadPoolExecutor(max_workers=5) as executor:  # Increased workers
+    with ThreadPoolExecutor(max_workers=5) as executor:
         loop = asyncio.get_event_loop()
         
         # Process batches in chunks to control concurrency
@@ -108,7 +101,7 @@ async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             for batch in chunk:
                 task = loop.run_in_executor(
                     executor,
-                    lambda b=batch: fetch_batch(b, session_pool)
+                    lambda b=batch: asyncio.run(fetch_batch(b))
                 )
                 tasks.append(task)
             
