@@ -3,187 +3,94 @@ from pytrends.request import TrendReq
 import time
 import matplotlib.pyplot as plt
 import os
-from typing import List, Optional, Dict
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import random
-import pickle
-from datetime import datetime, timedelta
-import hashlib
-import threading
+from typing import List, Optional
 
 # Configuration
-MAX_RETRIES = 3
-BATCH_DELAY = 5
 OUTPUT_DIR = 'output'
 EXCEL_FILE = 'keywords.xlsx'
 SHEET_NAME = 'Sheet1'
-CACHE_DIR = 'cache'
-CACHE_DURATION = timedelta(days=1)  # Cache results for 1 day
 
-def get_cache_key(keywords: List[str], timeframe: str, geo: str) -> str:
-    """Generate a unique cache key for the query."""
-    query_string = f"{'-'.join(sorted(keywords))}-{timeframe}-{geo}"
-    return hashlib.md5(query_string.encode()).hexdigest()
+def load_keywords_from_file(file_path: str) -> List[str]:
+    """Load keywords from Excel file."""
+    df = pd.read_excel(file_path)
+    return df['Keywords'].dropna().tolist()
 
-def get_cached_data(cache_key: str) -> Optional[pd.DataFrame]:
-    """Retrieve cached data if it exists and is not expired."""
-    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
-    if os.path.exists(cache_file):
-        modification_time = datetime.fromtimestamp(os.path.getmtime(cache_file))
-        if datetime.now() - modification_time < CACHE_DURATION:
-            with open(cache_file, 'rb') as f:
-                return pickle.load(f)
-    return None
-
-def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
-    """Save data to cache."""
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
-    with open(cache_file, 'wb') as f:
-        pickle.dump(data, f)
-
-def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch Google Trends data."""
-    print("DEBUG: Starting fetch_trends_data with keywords:", keywords)  # Debug line
-    print("DEBUG: Type of keywords:", type(keywords))  # Debug line
+def get_trends_data(keyword_list: List[str]) -> Optional[pd.DataFrame]:
+    """Simple function to get trends data."""
+    print(f"Starting trends analysis for keywords: {keyword_list}")
     
-    pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
-    batch_size = 2
-    batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
-    all_data = []
-    
-    print(f"\nProcessing {len(batches)} batches of keywords...")
-    
-    for batch in batches:
-        print(f"\nFetching data for: {batch}")
-        print("DEBUG: Type of batch:", type(batch))  # Debug line
-        
-        for attempt in range(MAX_RETRIES):
-            try:
-                pytrends.build_payload(
-                    batch,
-                    cat=0,
-                    timeframe='today 5-y',
-                    geo='DE',
-                    gprop=''
-                )
-                data = pytrends.interest_over_time()
-                
-                if data is not None and not data.empty:
-                    print(f"✓ Successfully fetched data for: {batch}")
-                    all_data.append(data)
-                    break
-                else:
-                    print(f"No data returned for: {batch}")
-                
-            except Exception as e:
-                print(f"Error on attempt {attempt + 1} for {batch}")
-                print(f"DEBUG: Full error: {repr(e)}")  # Debug line
-                print(f"DEBUG: Error type: {type(e)}")  # Debug line
-                if attempt < MAX_RETRIES - 1:
-                    delay = random.uniform(1, 3)
-                    print(f"Retrying in {delay:.1f} seconds...")
-                    time.sleep(delay)
-    
-    if not all_data:
-        print("\nNo data could be retrieved.")
-        return None
-
-    combined_data = pd.concat(all_data, axis=1)
-    combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
-    return combined_data
-
-def load_keywords_from_file(file_path: str, sheet_name: str = 'Sheet1') -> List[str]:
-    """Load keywords from an Excel file."""
     try:
-        keyword_data = pd.read_excel(file_path, sheet_name=sheet_name)
+        # Initialize pytrends
+        pytrends = TrendReq(hl='en-US', tz=360)
         
-        if 'Keywords' not in keyword_data.columns:
-            raise ValueError("Excel file must contain a 'Keywords' column")
+        # Build payload
+        pytrends.build_payload(
+            keyword_list,
+            cat=0,
+            timeframe='today 5-y',
+            geo='DE',
+            gprop=''
+        )
         
-        keywords = keyword_data['Keywords'].dropna().tolist()
-        
-        # Add validation for empty strings and whitespace
-        keywords = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
-        
-        if not keywords:
-            raise ValueError("No valid keywords found in the Excel file")
-        
-        print(f"Found {len(keywords)} valid keywords in the Excel file")
-        return keywords
-    
-    except Exception as e:
-        print(f"Error loading keywords: {str(e)}")
-        raise
-
-def load_keywords(file_path: str, sheet_name: str) -> List[str]:
-    """Load keywords from Excel file with error handling."""
-    try:
-        # Convert to absolute path and check if file exists
-        abs_path = os.path.abspath(file_path)
-        if not os.path.exists(abs_path):
-            raise FileNotFoundError(f"Excel file not found at: {abs_path}")
-        
-        print(f"Loading keywords from: {abs_path}")
-        return load_keywords_from_file(abs_path, sheet_name)
-    
-    except Exception as e:
-        print(f"Error loading keywords: {str(e)}")
-        raise
-
-def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
-    """Save data to CSV and create/save plot."""
-    # Create output directory if it doesn't exist
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # Save CSV - reset_index() to include the date column properly
-    csv_path = os.path.join(OUTPUT_DIR, 'google_trends_data.csv')
-    data.reset_index().to_csv(csv_path, index=False)
-    print(f"Data saved to '{csv_path}'")
-    
-    # Create and save plot
-    plt.figure(figsize=(10, 6))
-    # Plot directly from the original DataFrame
-    for keyword in keywords:
-        if keyword in data.columns:  # Check if keyword exists in the data
-            plt.plot(data.index, data[keyword], label=keyword)
-    
-    plt.title("Google Trends Data")
-    plt.xlabel("Date")
-    plt.ylabel("Search Interest")
-    plt.legend(title="Keywords")
-    plt.grid()
-    
-    plot_path = os.path.join(OUTPUT_DIR, 'google_trends_plot.png')
-    plt.savefig(plot_path)
-    plt.close()  # Close the figure to free memory
-    print(f"Plot saved to '{plot_path}'")
-
-def main():
-    """Main execution function."""
-    try:
-        print("DEBUG: Starting main function")  # Debug line
-        print(f"Current working directory: {os.getcwd()}")
-        
-        excel_path = os.path.abspath(EXCEL_FILE)
-        if not os.path.exists(excel_path):
-            raise FileNotFoundError(f"Excel file not found at: {excel_path}")
-        
-        keywords = load_keywords_from_file(excel_path, SHEET_NAME)
-        print("DEBUG: Keywords loaded:", keywords)  # Debug line
-        print("DEBUG: Type of keywords object:", type(keywords))  # Debug line
-        
-        data = fetch_trends_data(keywords)
+        # Get data
+        data = pytrends.interest_over_time()
         
         if data is not None and not data.empty:
-            save_data(data, keywords)
+            print("Successfully retrieved data!")
+            return data
         else:
-            print("\nNo data retrieved. Please try again later.")
-    
+            print("No data returned from Google Trends")
+            return None
+            
     except Exception as e:
-        print(f"DEBUG: Error in main: {repr(e)}")  # Debug line
-        print(f"An error occurred: {type(e).__name__}: {str(e)}")
+        print(f"Error getting trends data: {str(e)}")
+        return None
+
+def save_results(data: pd.DataFrame, keywords: List[str]):
+    """Save results to CSV and create plot."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    # Save CSV
+    csv_path = os.path.join(OUTPUT_DIR, 'trends_data.csv')
+    data.to_csv(csv_path)
+    print(f"Data saved to {csv_path}")
+    
+    # Create plot
+    plt.figure(figsize=(12, 6))
+    for kw in keywords:
+        plt.plot(data.index, data[kw], label=kw)
+    
+    plt.title('Google Trends Data')
+    plt.legend()
+    plt.grid(True)
+    
+    # Save plot
+    plot_path = os.path.join(OUTPUT_DIR, 'trends_plot.png')
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"Plot saved to {plot_path}")
+
+def main():
+    """Main function."""
+    try:
+        # Load keywords
+        print("Loading keywords...")
+        keywords = load_keywords_from_file(EXCEL_FILE)
+        print(f"Loaded keywords: {keywords}")
+        
+        # Get data
+        print("\nFetching trends data...")
+        data = get_trends_data(keywords)
+        
+        # Save results if we got data
+        if data is not None:
+            save_results(data, keywords)
+            print("\nAnalysis completed successfully!")
+        else:
+            print("\nCould not complete analysis - no data retrieved")
+            
+    except Exception as e:
+        print(f"Error in main function: {str(e)}")
 
 if __name__ == "__main__":
     main()
