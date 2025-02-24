@@ -47,13 +47,6 @@ async def fetch_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
     """Fetch a single batch of keywords."""
     pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
     
-    # Check cache first
-    cache_key = get_cache_key(batch_keywords, 'today 5-y', 'DE')
-    cached_data = get_cached_data(cache_key)
-    if cached_data is not None:
-        print(f"✓ Retrieved from cache: {batch_keywords}")
-        return cached_data
-
     for attempt in range(MAX_RETRIES):
         try:
             pytrends.build_payload(
@@ -67,7 +60,6 @@ async def fetch_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
             
             if data is not None and not data.empty:
                 print(f"✓ Successfully fetched data for: {batch_keywords}")
-                save_to_cache(cache_key, data)
                 return data
             
             print(f"No data returned for: {batch_keywords}")
@@ -78,6 +70,10 @@ async def fetch_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
                 await asyncio.sleep(random.uniform(1, 3))
     
     return None
+
+def fetch_batch_sync(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
+    """Synchronous wrapper for fetch_batch."""
+    return asyncio.run(fetch_batch(batch_keywords))
 
 async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Fetch Google Trends data using async approach."""
@@ -99,10 +95,8 @@ async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             # Create tasks for this chunk
             tasks = []
             for batch in chunk:
-                task = loop.run_in_executor(
-                    executor,
-                    lambda b=batch: asyncio.run(fetch_batch(b))
-                )
+                # Use the synchronous wrapper function
+                task = loop.run_in_executor(executor, fetch_batch_sync, batch)
                 tasks.append(task)
             
             # Wait for chunk to complete
@@ -195,39 +189,25 @@ def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
 def main():
     """Main execution function."""
     try:
-        # Print current working directory
         print(f"Current working directory: {os.getcwd()}")
         
         # Check if Excel file exists
         excel_path = os.path.abspath(EXCEL_FILE)
-        print(f"Looking for Excel file at: {excel_path}")
-        
         if not os.path.exists(excel_path):
             raise FileNotFoundError(f"Excel file not found at: {excel_path}")
-        
-        # Modify the pytrends initialization to increase timeout
-        pytrends = TrendReq(hl='en-US', tz=360, timeout=(30, 45), retries=3, backoff_factor=0.5)
         
         # Load keywords
         keywords = load_keywords(EXCEL_FILE, SHEET_NAME)
         print(f"Loaded {len(keywords)} keywords: {keywords}")
         
-        # Fetch data
-        data = fetch_trends_data(keywords)
+        # Fetch data using async approach
+        loop = asyncio.get_event_loop()
+        data = loop.run_until_complete(fetch_trends_data(keywords))
         
         if data is not None and not data.empty:
             save_data(data, keywords)
         else:
-            print("\nNo data retrieved. Please check your keywords or try again later.")
-            print("This might be due to:")
-            print("1. Rate limiting from Google Trends")
-            print("2. Invalid or unsearchable keywords")
-            print("3. Network connectivity issues")
-            print("\nTroubleshooting steps:")
-            print("1. Verify your keywords.xlsx file is properly formatted")
-            print("2. Try with fewer keywords (start with 2-3)")
-            print("3. Wait a few minutes before trying again")
-            print("4. Check your internet connection")
+            print("\nNo data retrieved. Please try again later.")
     
     except Exception as e:
         print(f"An error occurred: {type(e).__name__}: {str(e)}")
