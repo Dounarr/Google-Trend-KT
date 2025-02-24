@@ -15,7 +15,7 @@ def load_keywords_from_file(file_path: str) -> List[str]:
     df = pd.read_excel(file_path)
     return df['Keywords'].dropna().tolist()
 
-def get_trends_data(keyword_list: List[str]) -> Optional[pd.DataFrame]:
+def fetch_trends_data(keyword_list: List[str]) -> Optional[pd.DataFrame]:
     """Simple function to get trends data."""
     print(f"Starting trends analysis for keywords: {keyword_list}")
     
@@ -80,7 +80,7 @@ def main():
         
         # Get data
         print("\nFetching trends data...")
-        data = get_trends_data(keywords)
+        data = fetch_trends_data(keywords)
         
         # Save results if we got data
         if data is not None:
