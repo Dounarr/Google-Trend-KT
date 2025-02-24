@@ -14,7 +14,7 @@ import threading
 
 # Configuration
 MAX_RETRIES = 3
-BATCH_DELAY = 5  # Further reduced delay
+BATCH_DELAY = 5
 OUTPUT_DIR = 'output'
 EXCEL_FILE = 'keywords.xlsx'
 SHEET_NAME = 'Sheet1'
@@ -43,8 +43,8 @@ def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
     with open(cache_file, 'wb') as f:
         pickle.dump(data, f)
 
-async def fetch_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch a single batch of keywords."""
+def fetch_single_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
+    """Fetch a single batch of keywords synchronously."""
     pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
     
     for attempt in range(MAX_RETRIES):
@@ -63,17 +63,14 @@ async def fetch_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
                 return data
             
             print(f"No data returned for: {batch_keywords}")
+            time.sleep(random.uniform(1, 3))
             
         except Exception as e:
             print(f"Error on attempt {attempt + 1} for {batch_keywords}: {str(e)}")
             if attempt < MAX_RETRIES - 1:
-                await asyncio.sleep(random.uniform(1, 3))
+                time.sleep(random.uniform(1, 3))
     
     return None
-
-def fetch_batch_sync(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Synchronous wrapper for fetch_batch."""
-    return asyncio.run(fetch_batch(batch_keywords))
 
 async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Fetch Google Trends data using async approach."""
@@ -84,19 +81,18 @@ async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     print(f"\nProcessing {len(batches)} batches of keywords...")
     
     # Create a thread pool for running pytrends requests
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         loop = asyncio.get_event_loop()
         
         # Process batches in chunks to control concurrency
-        chunk_size = 3
+        chunk_size = 2
         for i in range(0, len(batches), chunk_size):
             chunk = batches[i:i + chunk_size]
             
             # Create tasks for this chunk
             tasks = []
             for batch in chunk:
-                # Use the synchronous wrapper function
-                task = loop.run_in_executor(executor, fetch_batch_sync, batch)
+                task = loop.run_in_executor(executor, fetch_single_batch, batch)
                 tasks.append(task)
             
             # Wait for chunk to complete
