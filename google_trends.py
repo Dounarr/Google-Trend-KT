@@ -30,90 +30,66 @@ def test_internet_connection():
         print(f"Connection test failed: {str(e)}")
         return False
 
-def fetch_trends_data(keywords: List[str], pytrends: Optional[TrendReq] = None) -> Optional[pd.DataFrame]:
-    """Simple, direct approach to fetch trends data."""
-    print("\nTesting internet connection...")
-    if not test_internet_connection():
-        print("Cannot connect to Google Trends. Please check your internet connection.")
-        return None
-
-    print(f"\nAttempting to fetch data for keywords: {keywords}")
+def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
+    """Simple function to get trends data."""
+    print(f"Starting trends analysis for keywords: {keywords}")
     
     try:
-        # Create new pytrends instance with different settings
+        # Initialize pytrends with conservative settings
         pytrends = TrendReq(
-            hl='de-DE',
-            tz=60,
-            timeout=(30, 30),
+            hl='de-DE',  # German language
+            tz=60,       # Europe/Berlin timezone
+            timeout=(10, 25),
             retries=2,
-            backoff_factor=1,
+            backoff_factor=0.5,
             requests_args={
                 'verify': True,
                 'headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/108.0.0.0 Safari/537.36'
                 }
             }
         )
         
-        # Test connection with a simple request
-        print("Testing connection to Google Trends API...")
-        try:
-            pytrends.get_historical_interest(['test'])
-            print("Connection to Google Trends API successful!")
-        except Exception as e:
-            print(f"Initial API test failed: {str(e)}")
-            return None
-
         # Try with just one keyword first
         test_keyword = keywords[0]
         print(f"\nTesting with single keyword: {test_keyword}")
         
-        # Build payload with minimal parameters
         try:
-            print("Building payload...")
+            # Build payload for single keyword
             pytrends.build_payload(
-                [test_keyword],
-                timeframe='today 12-m',
-                geo='DE'
+                kw_list=[test_keyword],
+                timeframe='today 12-m',  # Last 12 months
+                geo='DE',                # Germany
+                gprop=''                 # Web search
             )
             
-            print("Requesting data...")
+            # Get the data
             data = pytrends.interest_over_time()
             
             if data is not None and not data.empty:
-                print("Successfully retrieved test data!")
+                print(f"Successfully retrieved data for {test_keyword}")
                 print(f"Data shape: {data.shape}")
                 print(f"Columns: {data.columns.tolist()}")
-            else:
-                print("No data returned for test keyword")
-                return None
-                
-        except Exception as e:
-            print(f"Error during test request: {str(e)}")
-            return None
-
-        # If we got here, try with all keywords
-        print("\nTrying with all keywords...")
-        try:
-            pytrends.build_payload(
-                keywords[:5],  # Limit to 5 keywords
-                timeframe='today 12-m',
-                geo='DE'
-            )
-            
-            data = pytrends.interest_over_time()
-            
-            if data is not None and not data.empty:
-                print("Successfully retrieved data for all keywords!")
-                print(f"Final data shape: {data.shape}")
-                print(f"Final columns: {data.columns.tolist()}")
                 return data
             else:
-                print("No data returned for keywords")
+                print(f"No data returned for keyword: {test_keyword}")
+                # Try an alternative keyword as a test
+                print("\nTrying with test keyword 'Auto' to verify API...")
+                pytrends.build_payload(
+                    kw_list=['Auto'],
+                    timeframe='today 12-m',
+                    geo='DE'
+                )
+                test_data = pytrends.interest_over_time()
+                if test_data is not None and not test_data.empty:
+                    print("Test keyword worked - your keyword might have too low search volume")
+                else:
+                    print("Test keyword also failed - might be an API issue")
                 return None
                 
         except Exception as e:
-            print(f"Error during main request: {str(e)}")
+            print(f"Error during request: {str(e)}")
+            print("Type of error:", type(e).__name__)
             return None
             
     except Exception as e:
