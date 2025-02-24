@@ -99,10 +99,10 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     print(f"\nSuccessfully retrieved data for {combined_data.shape[1]} keywords")
     return combined_data
 
-def load_keywords_from_file(file_object, sheet_name: str = 'Sheet1') -> List[str]:
-    """Load keywords from an uploaded Excel file object."""
+def load_keywords_from_file(file_path: str, sheet_name: str = 'Sheet1') -> List[str]:
+    """Load keywords from an Excel file."""
     try:
-        keyword_data = pd.read_excel(file_object, sheet_name=sheet_name)
+        keyword_data = pd.read_excel(file_path, sheet_name=sheet_name)
         
         if 'Keywords' not in keyword_data.columns:
             raise ValueError("Excel file must contain a 'Keywords' column")
