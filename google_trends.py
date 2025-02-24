@@ -15,9 +15,9 @@ def load_keywords_from_file(file_path: str) -> List[str]:
     df = pd.read_excel(file_path)
     return df['Keywords'].dropna().tolist()
 
-def fetch_trends_data(keyword_list: List[str]) -> Optional[pd.DataFrame]:
+def analyze_trends(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Simple function to get trends data."""
-    print(f"Starting trends analysis for keywords: {keyword_list}")
+    print(f"Starting trends analysis for keywords: {keywords}")
     
     try:
         # Initialize pytrends
@@ -25,7 +25,7 @@ def fetch_trends_data(keyword_list: List[str]) -> Optional[pd.DataFrame]:
         
         # Build payload
         pytrends.build_payload(
-            keyword_list,
+            keywords,
             cat=0,
             timeframe='today 5-y',
             geo='DE',
@@ -80,7 +80,7 @@ def main():
         
         # Get data
         print("\nFetching trends data...")
-        data = fetch_trends_data(keywords)
+        data = analyze_trends(keywords)
         
         # Save results if we got data
         if data is not None:
