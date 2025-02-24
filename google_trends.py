@@ -6,10 +6,13 @@ import os
 from typing import List, Optional
 from pathlib import Path
 import io
+import random  # Am Anfang der Datei hinzufügen
 
 # Configuration
-MAX_RETRIES = 5
-RETRY_DELAY = 60  # seconds
+MAX_RETRIES = 3  # Reduziert von 5 auf 3
+MIN_RETRY_DELAY = 60  # Minimale Wartezeit in Sekunden
+MAX_RETRY_DELAY = 70  # Maximale Wartezeit in Sekunden
+BATCH_DELAY = 30  # Wartezeit zwischen Batches
 TIMEFRAME = 'today 12-m'
 OUTPUT_DIR = 'output'
 EXCEL_FILE = 'keywords.xlsx'
@@ -47,24 +50,57 @@ def load_keywords(file_path: str, sheet_name: str) -> List[str]:
         raise
 
 def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch Google Trends data with retry logic."""
-    for attempt in range(MAX_RETRIES):
-        try:
-            pytrends.build_payload(keywords, cat=0, timeframe=TIMEFRAME, geo='', gprop='')
-            data = pytrends.interest_over_time()
-            return data
+    """Fetch Google Trends data with retry logic and batch processing."""
+    batch_size = 5
+    all_data = []
+    
+    for i in range(0, len(keywords), batch_size):
+        batch_keywords = keywords[i:i + batch_size]
+        print(f"Fetching data for keywords: {batch_keywords}")
         
-        except Exception as e:
-            remaining_attempts = MAX_RETRIES - attempt - 1
-            print(f"Error occurred (attempts remaining: {remaining_attempts}):")
-            print(e)
-            
-            if remaining_attempts > 0:
-                print(f"Retrying in {RETRY_DELAY} seconds...")
-                time.sleep(RETRY_DELAY)
-            else:
-                print("Maximum retry attempts reached.")
-                return None
+        # Füge zufällige Wartezeit zwischen Batches ein
+        if i > 0:
+            delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 10)
+            print(f"Waiting {delay:.1f} seconds before next batch...")
+            time.sleep(delay)
+        
+        success = False
+        for attempt in range(MAX_RETRIES):
+            try:
+                pytrends.build_payload(batch_keywords, cat=0, timeframe=TIMEFRAME, geo='', gprop='')
+                batch_data = pytrends.interest_over_time()
+                
+                if batch_data is not None and not batch_data.empty:
+                    all_data.append(batch_data)
+                    print(f"Successfully fetched data for batch {i//batch_size + 1}")
+                    success = True
+                    break
+                
+            except Exception as e:
+                remaining_attempts = MAX_RETRIES - attempt - 1
+                print(f"Error occurred (attempts remaining: {remaining_attempts}):")
+                print(e)
+                
+                if remaining_attempts > 0:
+                    # Zufällige Wartezeit zwischen MIN_RETRY_DELAY und MAX_RETRY_DELAY
+                    retry_delay = random.uniform(MIN_RETRY_DELAY, MAX_RETRY_DELAY)
+                    print(f"Retrying in {retry_delay:.1f} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"Failed to fetch data for batch: {batch_keywords}")
+        
+        if not success:
+            print(f"Skipping batch after {MAX_RETRIES} failed attempts")
+            continue
+    
+    if not all_data:
+        return None
+    
+    # Combine all batches
+    combined_data = pd.concat(all_data, axis=1)
+    # Remove duplicate columns if any
+    combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
+    return combined_data
 
 def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
     """Save data to CSV and create/save plot."""
@@ -97,8 +133,8 @@ def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
 def main():
     """Main execution function."""
     try:
-        # Initialize pytrends
-        pytrends = TrendReq(hl='en-US', tz=360)
+        # Initialize pytrends with a custom timeout
+        pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25))  # Connect timeout: 10s, Read timeout: 25s
         
         # Load keywords
         keywords = load_keywords(EXCEL_FILE, SHEET_NAME)
