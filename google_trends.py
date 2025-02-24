@@ -20,55 +20,77 @@ def load_keywords_from_file(file_path: str) -> List[str]:
     return df['Keywords'].dropna().tolist()
 
 def fetch_trends_data(keywords: List[str], pytrends: Optional[TrendReq] = None) -> Optional[pd.DataFrame]:
-    """Function to get trends data with improved error handling."""
+    """Function to get trends data with improved error handling and debugging."""
     print(f"Starting trends analysis for keywords: {keywords}")
     
     try:
-        # Use provided pytrends instance or create new one
+        # Use provided pytrends instance or create new one with longer timeout
         if pytrends is None:
-            pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
+            pytrends = TrendReq(
+                hl='de-DE',  # Changed to German
+                tz=60,       # Changed timezone to Europe
+                timeout=(30, 30),  # Increased timeout
+                retries=3,
+                backoff_factor=0.5
+            )
         
-        # Process keywords in smaller batches (2 at a time)
+        # Process keywords in pairs
         batch_size = 2
         batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
         all_data = []
         
         for batch in batches:
-            print(f"Processing batch: {batch}")
-            try:
-                # Add a small delay between batches
-                time.sleep(random.uniform(1, 2))
-                
-                pytrends.build_payload(
-                    batch,
-                    cat=0,
-                    timeframe='today 5-y',  # 5 years of data
-                    geo='DE',  # Germany
-                    gprop=''
-                )
-                
-                data = pytrends.interest_over_time()
-                
-                if data is not None and not data.empty:
-                    print(f"✓ Successfully fetched data for: {batch}")
-                    all_data.append(data)
-                else:
-                    print(f"No data returned for batch: {batch}")
+            print(f"\nTrying batch: {batch}")
             
-            except Exception as e:
-                print(f"Error processing batch {batch}: {str(e)}")
-                continue
+            for attempt in range(3):  # Try each batch up to 3 times
+                try:
+                    # Add a small delay between attempts
+                    if attempt > 0:
+                        time.sleep(5)
+                    
+                    print(f"Building payload for: {batch}")
+                    pytrends.build_payload(
+                        batch,
+                        cat=0,
+                        timeframe='today 5-y',
+                        geo='DE',
+                        gprop=''
+                    )
+                    
+                    print("Requesting data...")
+                    data = pytrends.interest_over_time()
+                    
+                    if data is not None and not data.empty:
+                        print(f"✓ Successfully got data for: {batch}")
+                        print(f"Data shape: {data.shape}")
+                        print(f"Columns: {data.columns.tolist()}")
+                        all_data.append(data)
+                        break
+                    else:
+                        print(f"No data returned for batch: {batch}")
+                
+                except Exception as e:
+                    print(f"Attempt {attempt + 1} failed for {batch}: {str(e)}")
+                    if attempt == 2:  # Last attempt
+                        print(f"All attempts failed for batch: {batch}")
+            
+            # Add delay between batches
+            time.sleep(random.uniform(2, 3))
         
         if not all_data:
-            print("No data could be retrieved for any keywords")
+            print("\nNo data could be retrieved for any keywords")
             return None
         
         # Combine all batch results
+        print("\nCombining results...")
         combined_data = pd.concat(all_data, axis=1)
+        
         # Remove duplicate columns if any
         combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
         
-        print(f"Successfully retrieved data for {combined_data.shape[1]} keywords")
+        print(f"\nFinal data shape: {combined_data.shape}")
+        print(f"Final columns: {combined_data.columns.tolist()}")
+        
         return combined_data
             
     except Exception as e:
