@@ -44,7 +44,7 @@ def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
         pickle.dump(data, f)
 
 def fetch_single_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch a single batch of keywords synchronously."""
+    """Fetch a single batch of keywords."""
     pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
     
     for attempt in range(MAX_RETRIES):
@@ -72,36 +72,32 @@ def fetch_single_batch(batch_keywords: List[str]) -> Optional[pd.DataFrame]:
     
     return None
 
-async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch Google Trends data using async approach."""
+def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
+    """Fetch Google Trends data using parallel processing."""
     batch_size = 2
     batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
     all_data = []
     
     print(f"\nProcessing {len(batches)} batches of keywords...")
     
-    # Create a thread pool for running pytrends requests
+    # Use ThreadPoolExecutor for parallel processing
     with ThreadPoolExecutor(max_workers=3) as executor:
-        loop = asyncio.get_event_loop()
+        # Submit all batches to the executor
+        future_to_batch = {executor.submit(fetch_single_batch, batch): batch 
+                         for batch in batches}
         
-        # Process batches in chunks to control concurrency
-        chunk_size = 2
-        for i in range(0, len(batches), chunk_size):
-            chunk = batches[i:i + chunk_size]
+        # Process completed futures as they finish
+        for future in future_to_batch:
+            try:
+                data = future.result()
+                if data is not None:
+                    all_data.append(data)
+            except Exception as e:
+                batch = future_to_batch[future]
+                print(f"Error processing batch {batch}: {str(e)}")
             
-            # Create tasks for this chunk
-            tasks = []
-            for batch in chunk:
-                task = loop.run_in_executor(executor, fetch_single_batch, batch)
-                tasks.append(task)
-            
-            # Wait for chunk to complete
-            chunk_results = await asyncio.gather(*tasks)
-            all_data.extend([r for r in chunk_results if r is not None])
-            
-            # Small delay between chunks
-            if i + chunk_size < len(batches):
-                await asyncio.sleep(random.uniform(1, 2))
+            # Add a small delay between batches
+            time.sleep(random.uniform(1, 2))
 
     if not all_data:
         print("\nNo data could be retrieved. Possible reasons:")
@@ -196,9 +192,8 @@ def main():
         keywords = load_keywords(EXCEL_FILE, SHEET_NAME)
         print(f"Loaded {len(keywords)} keywords: {keywords}")
         
-        # Fetch data using async approach
-        loop = asyncio.get_event_loop()
-        data = loop.run_until_complete(fetch_trends_data(keywords))
+        # Fetch data using parallel processing
+        data = fetch_trends_data(keywords)
         
         if data is not None and not data.empty:
             save_data(data, keywords)
