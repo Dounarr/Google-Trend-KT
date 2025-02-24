@@ -3,20 +3,135 @@ from pytrends.request import TrendReq
 import time
 import matplotlib.pyplot as plt
 import os
-from typing import List, Optional
-from pathlib import Path
-import io
-import random  # Am Anfang der Datei hinzufügen
+from typing import List, Optional, Dict
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import random
+import pickle
+from datetime import datetime, timedelta
+import hashlib
+import threading
 
 # Configuration
-MAX_RETRIES = 3  # Reduziert von 5 auf 3
-MIN_RETRY_DELAY = 60  # Minimale Wartezeit in Sekunden
-MAX_RETRY_DELAY = 70  # Maximale Wartezeit in Sekunden
-BATCH_DELAY = 30  # Wartezeit zwischen Batches
-TIMEFRAME = 'today 12-m'
+MAX_RETRIES = 3
+BATCH_DELAY = 5  # Further reduced delay
 OUTPUT_DIR = 'output'
 EXCEL_FILE = 'keywords.xlsx'
 SHEET_NAME = 'Sheet1'
+CACHE_DIR = 'cache'
+CACHE_DURATION = timedelta(days=1)  # Cache results for 1 day
+
+def get_cache_key(keywords: List[str], timeframe: str, geo: str) -> str:
+    """Generate a unique cache key for the query."""
+    query_string = f"{'-'.join(sorted(keywords))}-{timeframe}-{geo}"
+    return hashlib.md5(query_string.encode()).hexdigest()
+
+def get_cached_data(cache_key: str) -> Optional[pd.DataFrame]:
+    """Retrieve cached data if it exists and is not expired."""
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
+    if os.path.exists(cache_file):
+        modification_time = datetime.fromtimestamp(os.path.getmtime(cache_file))
+        if datetime.now() - modification_time < CACHE_DURATION:
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+    return None
+
+def save_to_cache(cache_key: str, data: pd.DataFrame) -> None:
+    """Save data to cache."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.pkl")
+    with open(cache_file, 'wb') as f:
+        pickle.dump(data, f)
+
+async def fetch_batch(batch_keywords: List[str], session_pool: Dict[int, TrendReq]) -> Optional[pd.DataFrame]:
+    """Fetch a single batch of keywords using session pool."""
+    thread_id = threading.get_ident()
+    
+    # Get or create session for this thread
+    if thread_id not in session_pool:
+        session_pool[thread_id] = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2)
+    
+    pytrends = session_pool[thread_id]
+    
+    # Check cache first
+    cache_key = get_cache_key(batch_keywords, 'today 5-y', 'DE')
+    cached_data = get_cached_data(cache_key)
+    if cached_data is not None:
+        print(f"✓ Retrieved from cache: {batch_keywords}")
+        return cached_data
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            pytrends.build_payload(
+                batch_keywords,
+                cat=0,
+                timeframe='today 5-y',
+                geo='DE',
+                gprop=''
+            )
+            data = pytrends.interest_over_time()
+            
+            if data is not None and not data.empty:
+                print(f"✓ Successfully fetched data for: {batch_keywords}")
+                save_to_cache(cache_key, data)
+                return data
+            
+            print(f"No data returned for: {batch_keywords}")
+            
+        except Exception as e:
+            print(f"Error on attempt {attempt + 1} for {batch_keywords}: {str(e)}")
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(random.uniform(1, 3))
+    
+    return None
+
+async def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
+    """Fetch Google Trends data using async approach with session pool."""
+    batch_size = 2
+    batches = [keywords[i:i + batch_size] for i in range(0, len(keywords), batch_size)]
+    all_data = []
+    session_pool = {}
+    
+    print(f"\nProcessing {len(batches)} batches of keywords...")
+    
+    # Create a thread pool for running pytrends requests
+    with ThreadPoolExecutor(max_workers=5) as executor:  # Increased workers
+        loop = asyncio.get_event_loop()
+        
+        # Process batches in chunks to control concurrency
+        chunk_size = 3
+        for i in range(0, len(batches), chunk_size):
+            chunk = batches[i:i + chunk_size]
+            
+            # Create tasks for this chunk
+            tasks = []
+            for batch in chunk:
+                task = loop.run_in_executor(
+                    executor,
+                    lambda b=batch: fetch_batch(b, session_pool)
+                )
+                tasks.append(task)
+            
+            # Wait for chunk to complete
+            chunk_results = await asyncio.gather(*tasks)
+            all_data.extend([r for r in chunk_results if r is not None])
+            
+            # Small delay between chunks
+            if i + chunk_size < len(batches):
+                await asyncio.sleep(random.uniform(1, 2))
+
+    if not all_data:
+        print("\nNo data could be retrieved. Possible reasons:")
+        print("• Keywords have very low search volume")
+        print("• Keywords are too specific")
+        print("• Rate limiting from Google Trends")
+        return None
+
+    # Combine all results
+    combined_data = pd.concat(all_data, axis=1)
+    combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
+    print(f"\nSuccessfully retrieved data for {combined_data.shape[1]} keywords")
+    return combined_data
 
 def load_keywords_from_file(file_object, sheet_name: str = 'Sheet1') -> List[str]:
     """Load keywords from an uploaded Excel file object."""
@@ -55,72 +170,6 @@ def load_keywords(file_path: str, sheet_name: str) -> List[str]:
     except Exception as e:
         print(f"Error loading keywords: {str(e)}")
         raise
-
-def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.DataFrame]:
-    """Fetch Google Trends data with retry logic and batch processing."""
-    # Reduce batch size to 2 for better success rate
-    batch_size = 2
-    all_data = []
-    
-    for i in range(0, len(keywords), batch_size):
-        batch_keywords = keywords[i:i + batch_size]
-        print(f"\nFetching data for keywords: {batch_keywords}")
-        print(f"Processing batch {i//batch_size + 1} of {(len(keywords) + batch_size - 1)//batch_size}")
-        
-        # Increase initial delay
-        delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 10)
-        print(f"Waiting {delay:.1f} seconds before fetching...")
-        time.sleep(delay)
-        
-        success = False
-        for attempt in range(MAX_RETRIES):
-            try:
-                print(f"\nAttempt {attempt + 1}/{MAX_RETRIES}")
-                # Try with a longer timeframe to increase chances of getting data
-                pytrends.build_payload(
-                    batch_keywords,
-                    cat=0,
-                    timeframe='today 5-y',  # Changed from 12-m to 5-y
-                    geo='DE',  # Added German region since these seem to be German keywords
-                    gprop=''
-                )
-                batch_data = pytrends.interest_over_time()
-                
-                if batch_data is not None and not batch_data.empty:
-                    print(f"Success! Data shape: {batch_data.shape}")
-                    print(f"Data found for keywords: {batch_data.columns.tolist()}")
-                    all_data.append(batch_data)
-                    success = True
-                    break
-                else:
-                    print(f"No data returned for keywords: {batch_keywords}")
-                    
-            except Exception as e:
-                print(f"Error occurred: {type(e).__name__}: {str(e)}")
-                if attempt < MAX_RETRIES - 1:
-                    retry_delay = random.uniform(MIN_RETRY_DELAY, MAX_RETRY_DELAY)
-                    print(f"Retrying in {retry_delay:.1f} seconds...")
-                    time.sleep(retry_delay)
-        
-        if not success:
-            print(f"Warning: Could not fetch data for keywords: {batch_keywords}")
-            continue
-
-    if not all_data:
-        print("\nDetailed troubleshooting information:")
-        print("- Keywords attempted:", keywords)
-        print("- No data was successfully retrieved for any keyword combination")
-        print("- This might be because:")
-        print("  * The keywords have very low search volume")
-        print("  * The keywords are too specific or regional")
-        print("  * Google Trends doesn't have enough data for these terms")
-        return None
-    
-    # Combine all batches
-    combined_data = pd.concat(all_data, axis=1)
-    combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
-    print(f"\nFinal combined data shape: {combined_data.shape}")
-    return combined_data
 
 def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
     """Save data to CSV and create/save plot."""
@@ -171,7 +220,7 @@ def main():
         print(f"Loaded {len(keywords)} keywords: {keywords}")
         
         # Fetch data
-        data = fetch_trends_data(pytrends, keywords)
+        data = fetch_trends_data(keywords)
         
         if data is not None and not data.empty:
             save_data(data, keywords)
