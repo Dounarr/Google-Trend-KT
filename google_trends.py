@@ -58,7 +58,9 @@ def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.Da
         batch_keywords = keywords[i:i + batch_size]
         print(f"Fetching data for keywords: {batch_keywords}")
         
-        # Füge zufällige Wartezeit zwischen Batches ein
+        # Add debug information about the batch
+        print(f"Processing batch {i//batch_size + 1} of {(len(keywords) + batch_size - 1)//batch_size}")
+        
         if i > 0:
             delay = random.uniform(BATCH_DELAY, BATCH_DELAY + 10)
             print(f"Waiting {delay:.1f} seconds before next batch...")
@@ -70,19 +72,23 @@ def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.Da
                 pytrends.build_payload(batch_keywords, cat=0, timeframe=TIMEFRAME, geo='', gprop='')
                 batch_data = pytrends.interest_over_time()
                 
+                # Add debug information about the response
+                print(f"Response received - Data shape: {batch_data.shape if batch_data is not None else 'None'}")
+                
                 if batch_data is not None and not batch_data.empty:
                     all_data.append(batch_data)
                     print(f"Successfully fetched data for batch {i//batch_size + 1}")
                     success = True
                     break
-                
+                else:
+                    print("Received empty response from Google Trends")
+                    
             except Exception as e:
                 remaining_attempts = MAX_RETRIES - attempt - 1
                 print(f"Error occurred (attempts remaining: {remaining_attempts}):")
-                print(e)
+                print(f"Error details: {type(e).__name__}: {str(e)}")
                 
                 if remaining_attempts > 0:
-                    # Zufällige Wartezeit zwischen MIN_RETRY_DELAY und MAX_RETRY_DELAY
                     retry_delay = random.uniform(MIN_RETRY_DELAY, MAX_RETRY_DELAY)
                     print(f"Retrying in {retry_delay:.1f} seconds...")
                     time.sleep(retry_delay)
@@ -94,12 +100,14 @@ def fetch_trends_data(pytrends: TrendReq, keywords: List[str]) -> Optional[pd.Da
             continue
     
     if not all_data:
+        print("No data was collected from any batch")
         return None
     
     # Combine all batches
     combined_data = pd.concat(all_data, axis=1)
     # Remove duplicate columns if any
     combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
+    print(f"Final combined data shape: {combined_data.shape}")
     return combined_data
 
 def save_data(data: pd.DataFrame, keywords: List[str]) -> None:
@@ -134,10 +142,11 @@ def main():
     """Main execution function."""
     try:
         # Initialize pytrends with a custom timeout
-        pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25))  # Connect timeout: 10s, Read timeout: 25s
+        pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25), retries=2, backoff_factor=0.1)
         
         # Load keywords
         keywords = load_keywords(EXCEL_FILE, SHEET_NAME)
+        print(f"Loaded {len(keywords)} keywords: {keywords}")
         
         # Fetch data
         data = fetch_trends_data(pytrends, keywords)
@@ -145,10 +154,15 @@ def main():
         if data is not None and not data.empty:
             save_data(data, keywords)
         else:
-            print("No data retrieved. Please check your keywords or time range.")
+            print("No data retrieved. Please check your keywords or try again later.")
+            print("This might be due to:")
+            print("1. Rate limiting from Google Trends")
+            print("2. Invalid or unsearchable keywords")
+            print("3. Network connectivity issues")
+            print("Try reducing the number of keywords or waiting a few minutes before trying again.")
     
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        print(f"An error occurred: {type(e).__name__}: {str(e)}")
 
 if __name__ == "__main__":
     main()
