@@ -56,14 +56,52 @@ def cached_fetch_trends_data(keywords_batch):
         st.error(f"Error in cached_fetch_trends_data: {str(e)}")
         return None
 
-def process_keyword_batch(keywords_batch, status_text):
-    """Process a batch of keywords together"""
-    try:
-        status_text.text(f"Fetching data for keywords: {', '.join(keywords_batch)}")
-        return cached_fetch_trends_data(keywords_batch)
-    except Exception as e:
-        st.error(f"Error in process_keyword_batch: {str(e)}")
+def process_all_keywords(keywords):
+    """Process all keywords in batches and combine the results"""
+    all_data = []
+    total_batches = (len(keywords) + 4) // 5  # Calculate total number of batches
+    
+    for i in range(0, len(keywords), 5):
+        batch_num = (i // 5) + 1
+        keyword_batch = keywords[i:i+5]
+        st.write(f"Processing batch {batch_num} of {total_batches}")
+        
+        # Process this batch
+        batch_data = cached_fetch_trends_data(keyword_batch)
+        if batch_data is not None and not batch_data.empty:
+            all_data.append(batch_data)
+            st.write(f"Successfully processed batch {batch_num}")
+        else:
+            st.warning(f"No data retrieved for batch {batch_num}: {keyword_batch}")
+    
+    if not all_data:
         return None
+    
+    # Combine all batches
+    st.write("Combining data from all batches...")
+    
+    # First, ensure all DataFrames have the same index
+    common_index = all_data[0].index
+    for df in all_data[1:]:
+        common_index = common_index.union(df.index)
+    
+    # Reindex all DataFrames to have the same index
+    aligned_data = [df.reindex(common_index) for df in all_data]
+    
+    # Combine all data
+    combined_data = pd.concat(aligned_data, axis=1)
+    
+    # Remove duplicate columns if any
+    combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
+    
+    # Remove the isPartial column if it exists
+    if 'isPartial' in combined_data.columns:
+        combined_data = combined_data.drop('isPartial', axis=1)
+    
+    st.write(f"Final combined data shape: {combined_data.shape}")
+    st.write(f"Final columns: {combined_data.columns.tolist()}")
+    
+    return combined_data
 
 if uploaded_file is not None:
     try:
@@ -80,14 +118,13 @@ if uploaded_file is not None:
             status_text = st.empty()
             
             try:
-                # Process all keywords at once
+                # Process all keywords in batches
                 status_text.text("Fetching trends data...")
                 st.write("Starting trends analysis...")
-                data = fetch_trends_data(keywords)
+                
+                data = process_all_keywords(keywords)
+                
                 st.write("Trends analysis completed")
-                if data is not None:
-                    st.write(f"Data shape: {data.shape}")
-                    st.write(f"Data columns: {data.columns.tolist()}")
                 progress_bar.progress(1.0)
                 
                 if data is not None and not data.empty:
