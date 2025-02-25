@@ -51,14 +51,17 @@ def cached_fetch_trends_data(keywords_batch):
         result = fetch_trends_data(keywords_batch)
         if result is not None:
             st.write(f"Retrieved data columns: {result.columns.tolist()}")
-        return result
+            return result
+        return None
     except Exception as e:
         st.error(f"Error in cached_fetch_trends_data: {str(e)}")
+        # Return None instead of caching the error
         return None
 
 def process_all_keywords(keywords):
     """Process all keywords in batches and combine the results"""
     all_data = []
+    failed_batches = []  # Store failed batches
     total_batches = (len(keywords) + 4) // 5  # Calculate total number of batches
     
     for i in range(0, len(keywords), 5):
@@ -73,6 +76,22 @@ def process_all_keywords(keywords):
             st.write(f"Successfully processed batch {batch_num}")
         else:
             st.warning(f"No data retrieved for batch {batch_num}: {keyword_batch}")
+            failed_batches.append((batch_num, keyword_batch))
+    
+    # Handle failed batches
+    if failed_batches:
+        st.error(f"Failed to process {len(failed_batches)} batch(es)")
+        for batch_num, keyword_batch in failed_batches:
+            if st.button(f"Retry Batch {batch_num}: {', '.join(keyword_batch)}"):
+                st.write(f"Retrying batch {batch_num}...")
+                batch_data = cached_fetch_trends_data(keyword_batch)
+                if batch_data is not None and not batch_data.empty:
+                    all_data.append(batch_data)
+                    st.success(f"Successfully processed batch {batch_num} on retry!")
+                    # Remove from failed batches
+                    failed_batches.remove((batch_num, keyword_batch))
+                else:
+                    st.error(f"Retry failed for batch {batch_num}")
     
     if not all_data:
         return None
@@ -101,6 +120,11 @@ def process_all_keywords(keywords):
     st.write(f"Final combined data shape: {combined_data.shape}")
     st.write(f"Final columns: {combined_data.columns.tolist()}")
     
+    # If there are still failed batches, show which keywords are missing
+    if failed_batches:
+        missing_keywords = [kw for _, batch in failed_batches for kw in batch]
+        st.warning("⚠️ The following keywords could not be processed: " + ", ".join(missing_keywords))
+    
     return combined_data
 
 if uploaded_file is not None:
@@ -128,6 +152,9 @@ if uploaded_file is not None:
                 progress_bar.progress(1.0)
                 
                 if data is not None and not data.empty:
+                    # Show summary of processed keywords
+                    st.success(f"Successfully processed {len(data.columns)} keywords")
+                    
                     # Create two columns for CSV and plot
                     col1, col2 = st.columns(2)
                     
