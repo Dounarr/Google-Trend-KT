@@ -28,9 +28,12 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
         
         # Process keywords in batches of 5
         all_data = []
+        successful_keywords = set()  # Track which keywords we've gotten data for
+        
         for i in range(0, len(keywords), 5):
             keyword_batch = keywords[i:i+5]
-            print(f"\nProcessing batch: {keyword_batch}")
+            print(f"\nProcessing batch {i//5 + 1} of {(len(keywords) + 4)//5}")
+            print(f"Keywords in this batch: {keyword_batch}")
             
             # Try different timeframes
             timeframes = [
@@ -59,7 +62,8 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
                     if data is not None and not data.empty:
                         print("Successfully retrieved data!")
                         print(f"Data shape: {data.shape}")
-                        print(f"Columns: {data.columns.tolist()}")
+                        print(f"Retrieved columns: {[col for col in data.columns if col != 'isPartial']}")
+                        successful_keywords.update([col for col in data.columns if col != 'isPartial'])
                         all_data.append(data)
                         batch_success = True
                         break  # Success! Move to next batch
@@ -84,6 +88,15 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             print(f"Waiting {delay:.1f} seconds between batches...")
             time.sleep(delay)
         
+        # Print summary of what we got
+        print("\nSummary:")
+        print(f"Total keywords processed: {len(keywords)}")
+        print(f"Successfully retrieved data for {len(successful_keywords)} keywords")
+        print(f"Keywords with data: {sorted(list(successful_keywords))}")
+        missing_keywords = set(keywords) - successful_keywords
+        if missing_keywords:
+            print(f"Missing keywords: {sorted(list(missing_keywords))}")
+        
         # Combine all data if we have any
         if all_data:
             # First, ensure all DataFrames have the same index
@@ -103,7 +116,9 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             # Remove the isPartial column if it exists
             if 'isPartial' in combined_data.columns:
                 combined_data = combined_data.drop('isPartial', axis=1)
-                
+            
+            print(f"\nFinal data shape: {combined_data.shape}")
+            print(f"Final columns: {combined_data.columns.tolist()}")
             return combined_data
         
         print("\nNo data retrieved for any keyword batch")
