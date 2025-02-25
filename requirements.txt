@@ -6,3 +6,6 @@ Pillow
 plotly
 kaleido
 openpyxl
+requests
+numpy
+python-dotenv
