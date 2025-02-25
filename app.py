@@ -23,6 +23,11 @@ except Exception as e:
     st.error(f"Import error: {str(e)}")
     st.stop()
 
+# Add this near the top of your app, after the imports
+if st.button("Clear Cache"):
+    st.cache_data.clear()
+    st.success("Cache cleared!")
+
 st.title("Google Trends Analyzer")
 
 st.write("""
@@ -38,11 +43,15 @@ def load_keywords_cached(file):
     """Cache the keyword loading process"""
     return load_keywords_from_file(file)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=True)
 def cached_fetch_trends_data(keywords_batch):
     """Cached version of fetch_trends_data for a batch of keywords"""
     try:
-        return fetch_trends_data(keywords_batch)
+        st.write(f"Processing {len(keywords_batch)} keywords: {keywords_batch}")
+        result = fetch_trends_data(keywords_batch)
+        if result is not None:
+            st.write(f"Retrieved data columns: {result.columns.tolist()}")
+        return result
     except Exception as e:
         st.error(f"Error in cached_fetch_trends_data: {str(e)}")
         return None
@@ -61,6 +70,7 @@ if uploaded_file is not None:
         # Load keywords with caching
         keywords = load_keywords_cached(uploaded_file)
         
+        st.write(f"Total keywords found: {len(keywords)}")
         st.write("Keywords found:", keywords)
         
         # Add a button to start analysis
@@ -72,7 +82,12 @@ if uploaded_file is not None:
             try:
                 # Process all keywords at once
                 status_text.text("Fetching trends data...")
+                st.write("Starting trends analysis...")
                 data = fetch_trends_data(keywords)
+                st.write("Trends analysis completed")
+                if data is not None:
+                    st.write(f"Data shape: {data.shape}")
+                    st.write(f"Data columns: {data.columns.tolist()}")
                 progress_bar.progress(1.0)
                 
                 if data is not None and not data.empty:
