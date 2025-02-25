@@ -37,10 +37,10 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             try:
                 print(f"\nTrying timeframe: {timeframe}")
                 
-                # Build payload with single keyword
+                # Build payload with up to 5 keywords
                 print("Building payload...")
                 pytrends.build_payload(
-                    kw_list=keywords[:1],  # Just try first keyword
+                    kw_list=keywords[:5],  # Use up to 5 keywords
                     timeframe=timeframe,
                     geo='DE'
                 )
