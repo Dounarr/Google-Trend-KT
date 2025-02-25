@@ -39,6 +39,7 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
                 'now 7-d'     # Last week
             ]
             
+            batch_success = False
             for timeframe in timeframes:
                 try:
                     print(f"\nTrying timeframe: {timeframe}")
@@ -60,18 +61,23 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
                         print(f"Data shape: {data.shape}")
                         print(f"Columns: {data.columns.tolist()}")
                         all_data.append(data)
+                        batch_success = True
                         break  # Success! Move to next batch
                     else:
                         print(f"No data for timeframe {timeframe}")
                     
+                except Exception as e:
+                    print(f"Error with timeframe {timeframe}: {str(e)}")
+                    continue
+                
+                finally:
                     # Add delay between attempts
                     delay = random.uniform(5, 10)
                     print(f"Waiting {delay:.1f} seconds...")
                     time.sleep(delay)
-                    
-                except Exception as e:
-                    print(f"Error with timeframe {timeframe}: {str(e)}")
-                    continue
+            
+            if not batch_success:
+                print(f"Warning: Could not get data for batch: {keyword_batch}")
             
             # Add delay between batches
             delay = random.uniform(10, 15)
@@ -80,9 +86,24 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
         
         # Combine all data if we have any
         if all_data:
-            combined_data = pd.concat(all_data, axis=1)
+            # First, ensure all DataFrames have the same index
+            common_index = all_data[0].index
+            for df in all_data[1:]:
+                common_index = common_index.union(df.index)
+            
+            # Reindex all DataFrames to have the same index
+            aligned_data = [df.reindex(common_index) for df in all_data]
+            
+            # Combine all data
+            combined_data = pd.concat(aligned_data, axis=1)
+            
             # Remove duplicate columns if any
             combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
+            
+            # Remove the isPartial column if it exists
+            if 'isPartial' in combined_data.columns:
+                combined_data = combined_data.drop('isPartial', axis=1)
+                
             return combined_data
         
         print("\nNo data retrieved for any keyword batch")
