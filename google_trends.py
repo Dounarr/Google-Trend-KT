@@ -17,7 +17,7 @@ def load_keywords_from_file(file_path: str) -> List[str]:
 
 def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
     """Get trends data with shorter timeframe."""
-    print(f"\nStarting trends analysis for: {keywords}")
+    print(f"\nStarting trends analysis for {len(keywords)} keywords")
     
     try:
         # Initialize with minimal settings
@@ -26,47 +26,66 @@ def fetch_trends_data(keywords: List[str]) -> Optional[pd.DataFrame]:
             tz=60
         )
         
-        # Try different timeframes
-        timeframes = [
-            'today 3-m',  # Last 3 months
-            'today 1-m',  # Last month
-            'now 7-d'     # Last week
-        ]
-        
-        for timeframe in timeframes:
-            try:
-                print(f"\nTrying timeframe: {timeframe}")
-                
-                # Build payload with up to 5 keywords
-                print("Building payload...")
-                pytrends.build_payload(
-                    kw_list=keywords[:5],  # Use up to 5 keywords
-                    timeframe=timeframe,
-                    geo='DE'
-                )
-                
-                # Get the data
-                print("Requesting data...")
-                data = pytrends.interest_over_time()
-                
-                if data is not None and not data.empty:
-                    print("Successfully retrieved data!")
-                    print(f"Data shape: {data.shape}")
-                    print(f"Columns: {data.columns.tolist()}")
-                    return data
-                else:
-                    print(f"No data for timeframe {timeframe}")
+        # Process keywords in batches of 5
+        all_data = []
+        for i in range(0, len(keywords), 5):
+            keyword_batch = keywords[i:i+5]
+            print(f"\nProcessing batch: {keyword_batch}")
+            
+            # Try different timeframes
+            timeframes = [
+                'today 3-m',  # Last 3 months
+                'today 1-m',  # Last month
+                'now 7-d'     # Last week
+            ]
+            
+            for timeframe in timeframes:
+                try:
+                    print(f"\nTrying timeframe: {timeframe}")
                     
-                # Add delay between attempts
-                delay = random.uniform(5, 10)
-                print(f"Waiting {delay:.1f} seconds...")
-                time.sleep(delay)
-                
-            except Exception as e:
-                print(f"Error with timeframe {timeframe}: {str(e)}")
-                continue
+                    # Build payload with current batch
+                    print("Building payload...")
+                    pytrends.build_payload(
+                        kw_list=keyword_batch,
+                        timeframe=timeframe,
+                        geo='DE'
+                    )
+                    
+                    # Get the data
+                    print("Requesting data...")
+                    data = pytrends.interest_over_time()
+                    
+                    if data is not None and not data.empty:
+                        print("Successfully retrieved data!")
+                        print(f"Data shape: {data.shape}")
+                        print(f"Columns: {data.columns.tolist()}")
+                        all_data.append(data)
+                        break  # Success! Move to next batch
+                    else:
+                        print(f"No data for timeframe {timeframe}")
+                    
+                    # Add delay between attempts
+                    delay = random.uniform(5, 10)
+                    print(f"Waiting {delay:.1f} seconds...")
+                    time.sleep(delay)
+                    
+                except Exception as e:
+                    print(f"Error with timeframe {timeframe}: {str(e)}")
+                    continue
+            
+            # Add delay between batches
+            delay = random.uniform(10, 15)
+            print(f"Waiting {delay:.1f} seconds between batches...")
+            time.sleep(delay)
         
-        print("\nAll timeframes failed")
+        # Combine all data if we have any
+        if all_data:
+            combined_data = pd.concat(all_data, axis=1)
+            # Remove duplicate columns if any
+            combined_data = combined_data.loc[:, ~combined_data.columns.duplicated()]
+            return combined_data
+        
+        print("\nNo data retrieved for any keyword batch")
         return None
             
     except Exception as e:
